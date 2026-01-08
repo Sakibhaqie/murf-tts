@@ -1,0 +1,36 @@
+# Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Env files
+.env
+*.env
+
+# Distribution / build
+build/
+dist/
+*.egg-info/
+
+# Pip / wheel
+pip-wheel-metadata/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Tests / coverage
+.coverage
+htmlcov/
+
+main.py
+tests/
+test_client.py
+tts_service.py
