@@ -30,7 +30,7 @@ pip-wheel-metadata/
 .coverage
 htmlcov/
 
-main.py
+# main.py
 tests/
 test_client.py
 tts_service.py
