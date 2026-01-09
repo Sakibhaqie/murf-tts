@@ -3,137 +3,433 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice Chat Debug</title>
-    <link rel="icon" href="data:,">
+    <title>Murf AI 3D Assistant</title>
+    <link rel="icon" href="data:,"> <script src="https://cdn.tailwindcss.com"></script>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
     <style>
-        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; }
-        .box { background: white; padding: 20px; border-radius: 8px; max-width: 600px; margin: 0 auto; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        #chat { height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; background: #fff; }
-        .msg { padding: 8px 12px; margin: 5px 0; border-radius: 15px; width: fit-content; }
-        .user { background: #007bff; color: white; margin-left: auto; }
-        .bot { background: #e9ecef; color: black; }
-        .controls { display: flex; gap: 10px; }
-        input { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
-        button { padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; }
-        #debug { font-size: 12px; color: #666; margin-top: 10px; font-family: monospace; }
-        .err { color: red; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #000000;
+            color: white;
+            overflow: hidden;
+            margin: 0;
+        }
+
+        /* Glassmorphism Sidebar */
+        .glass-panel {
+            background: rgba(10, 10, 12, 0.6);
+            backdrop-filter: blur(25px);
+            border-left: 1px solid rgba(255, 255, 255, 0.08);
+            z-index: 50;
+        }
+
+        .chat-bubble {
+            max-width: 85%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            position: relative;
+            animation: fadeIn 0.4s ease-out forwards;
+        }
+
+        .user-bubble {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .ai-bubble {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            color: #e2e8f0;
+            border-bottom-left-radius: 4px;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Input Glow */
+        .input-glow:focus-within {
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+            border-color: rgba(99, 102, 241, 0.5);
+        }
+
+        #visualizer-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            background: radial-gradient(circle at center, #111827 0%, #000000 100%);
+        }
     </style>
 </head>
-<body>
 
-<div class="box">
-    <h2 style="text-align:center">🔊 Audio Debug Chat</h2>
-    <div id="chat"></div>
-    <div class="controls">
-        <input type="text" id="input" placeholder="Type here..." onkeypress="if(event.key==='Enter') send()">
-        <button onclick="send()">Send</button>
-    </div>
-    <div id="debug">Status: Ready</div>
-</div>
+<body class="flex h-screen w-screen overflow-hidden">
 
-<script>
-    const ws = new WebSocket("ws://localhost:8000/ws");
-    const chat = document.getElementById("chat");
-    const debug = document.getElementById("debug");
-    
-    // Audio State
-    let ctx = null;
-    let nextTime = 0;
-    const SAMPLE_RATE = 24000;
+    <main class="flex-1 relative">
+        <div id="visualizer-container"></div>
 
-    ws.onopen = () => log("🟢 WS Connected");
-    ws.onclose = () => log("🔴 WS Disconnected");
-    ws.onerror = () => log("⚠️ WS Error", true);
+        <div class="absolute top-10 left-10 z-40 pointer-events-none">
+            <h1 class="text-3xl font-light tracking-[0.3em] text-white/80 drop-shadow-lg">AURA<span class="font-bold text-indigo-400">.AI</span></h1>
+            <div class="flex items-center gap-3 mt-3">
+                <div id="status-dot" class="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.8)] transition-all duration-500"></div>
+                <p id="status-text" class="text-[10px] font-mono text-slate-400 tracking-widest uppercase shadow-black drop-shadow-md">System Offline</p>
+            </div>
+        </div>
 
-    ws.onmessage = async (e) => {
-        if (e.data instanceof Blob) {
-            // Audio Data Received
-            playAudio(e.data);
-        } else {
-            // Text Received
-            const data = JSON.parse(e.data);
-            if (data.type === 'text') addMsg(data.content, 'bot');
-            if (data.type === 'error') log("Backend Error: " + data.content, true);
+        <div class="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
+            <p id="ai-state-text" class="mt-[350px] text-xs font-mono text-indigo-300/50 tracking-[0.4em] uppercase transition-all duration-500">
+                Initializing Core...
+            </p>
+        </div>
+    </main>
+
+    <aside class="w-[400px] glass-panel h-full flex flex-col shadow-2xl">
+        <div class="p-6 border-b border-white/5">
+            <label class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Voice Synthesis Model</label>
+            <div class="relative group">
+                <select id="voice-select" class="w-full bg-black/40 border border-white/10 rounded-lg py-3 px-4 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 appearance-none cursor-pointer transition-all hover:bg-black/60 hover:border-indigo-500/30">
+                    <option>Loading modules...</option>
+                </select>
+                <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-indigo-400 group-hover:text-indigo-300 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                </div>
+            </div>
+        </div>
+
+        <div id="chat-history" class="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth">
+            <div class="flex justify-start">
+                <div class="ai-bubble chat-bubble">
+                    Systems online. Select a voice persona to begin our interaction.
+                </div>
+            </div>
+        </div>
+
+        <div class="p-5 border-t border-white/5 bg-black/20">
+            <form id="chat-form" class="input-glow relative bg-white/5 border border-white/10 rounded-2xl transition-all duration-300 flex items-center p-1.5">
+                <input type="text" id="user-input" class="flex-1 bg-transparent border-none text-white text-sm px-4 py-3 focus:ring-0 placeholder-slate-600 font-light tracking-wide" placeholder="Enter command..." autocomplete="off">
+                <button type="submit" class="p-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl transition-all text-white shadow-[0_0_15px_rgba(99,102,241,0.4)] hover:shadow-[0_0_25px_rgba(99,102,241,0.6)] hover:scale-105 active:scale-95 m-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path></svg>
+                </button>
+            </form>
+        </div>
+    </aside>
+
+    <script type="module">
+        // 1. Import Three.js and Addons via the Import Map
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+        // Custom Simple Noise (Backup if simplex fails)
+        class SimpleNoise {
+            constructor() { this.perm = new Uint8Array(512); for(let i=0;i<512;i++)this.perm[i]=Math.floor(Math.random()*255); }
+            noise3D(x,y,z) { return Math.sin(x) * Math.cos(y) * Math.sin(z); } 
         }
-    };
 
-    function log(msg, isErr = false) {
-        debug.textContent = msg;
-        debug.className = isErr ? 'err' : '';
-        console.log(msg);
-    }
-
-    function addMsg(text, role) {
-        const div = document.createElement("div");
-        div.className = `msg ${role}`;
-        div.textContent = text;
-        chat.appendChild(div);
-        chat.scrollTop = chat.scrollHeight;
-    }
-
-    function send() {
-        const text = document.getElementById("input").value;
-        if (!text) return;
+        // --- CONFIGURATION ---
+        // const WS_URL = 'ws://localhost:8000/ws'; 
+        // const API_URL = 'http://localhost:8000';
+        // --- CONFIG ---
+        // Note the added "/api" at the end
+        const WS_URL = 'wss://app.airento.site/api/ws';
+        const API_URL = 'https://app.airento.site/api';
         
-        // 1. Initialize Audio immediately on click
-        initAudio();
+        // --- VARIABLES ---
+        let scene, camera, renderer, composer, sphere, geometry, originalPositions;
+        let simplex = new SimpleNoise();
         
-        addMsg(text, 'user');
-        ws.send(text);
-        document.getElementById("input").value = "";
-    }
+        let audioContext, analyser, dataArray;
+        let audioQueue = [];
+        let isPlaying = false;
+        let isConnected = false;
+        let currentVolume = 0;
+        let socket;
 
-    function initAudio() {
-        if (!ctx) {
-            ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
-            log("🔊 Audio Context Created");
+        // --- DOM ELEMENTS ---
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const aiStateText = document.getElementById('ai-state-text');
+        const chatHistory = document.getElementById('chat-history');
+        const voiceSelect = document.getElementById('voice-select');
+        const userInput = document.getElementById('user-input');
+
+        // ==========================================
+        // 1. THREE.JS SETUP (FIXED ALIGNMENT)
+        // ==========================================
+        function initThreeJS() {
+            const container = document.getElementById('visualizer-container');
+            
+            // Get accurate dimensions of the "black area" only
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.02);
+
+            camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+            camera.position.z = 22; // Distance from sphere
+            camera.position.x = 0;  // FIXED: Center the camera perfectly
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(width, height);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.toneMapping = THREE.ReinhardToneMapping;
+            container.appendChild(renderer.domElement);
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0x404040, 2);
+            scene.add(ambientLight);
+            const p1 = new THREE.PointLight(0x6366f1, 2, 50); p1.position.set(10, 10, 10); scene.add(p1);
+            const p2 = new THREE.PointLight(0xa855f7, 2, 50); p2.position.set(-10, -10, 10); scene.add(p2);
+
+            // Sphere
+            geometry = new THREE.IcosahedronGeometry(4, 30);
+            originalPositions = geometry.attributes.position.array.slice();
+
+            const material = new THREE.MeshPhysicalMaterial({
+                color: 0x1e1b4b,
+                emissive: 0x4f46e5,
+                emissiveIntensity: 0.2,
+                metalness: 0.9,
+                roughness: 0.1,
+                wireframe: true
+            });
+
+            sphere = new THREE.Mesh(geometry, material);
+            scene.add(sphere);
+
+            // Post Processing
+            const renderScene = new RenderPass(scene, camera);
+            const bloomPass = new UnrealBloomPass(
+                new THREE.Vector2(width, height),
+                1.5, 0.4, 0.85
+            );
+
+            composer = new EffectComposer(renderer);
+            composer.addPass(renderScene);
+            composer.addPass(bloomPass);
+
+            // Responsive Resize (FIXED)
+            window.addEventListener('resize', () => {
+                const newWidth = container.clientWidth;
+                const newHeight = container.clientHeight;
+
+                camera.aspect = newWidth / newHeight;
+                camera.updateProjectionMatrix();
+                
+                renderer.setSize(newWidth, newHeight);
+                composer.setSize(newWidth, newHeight);
+            });
+
+            animate();
         }
-        if (ctx.state === 'suspended') {
-            ctx.resume().then(() => log("🔊 Audio Resumed"));
-        }
-    }
 
-    async function playAudio(blob) {
-        // Ensure context exists
-        if (!ctx) initAudio();
-        
-        const size = blob.size;
-        log(`📥 Received ${size} bytes of audio`);
+        // ==========================================
+        // 2. ANIMATION LOOP
+        // ==========================================
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = performance.now() * 0.001;
 
-        if (size < 100) {
-            log("⚠️ Audio chunk too small (Silence/Error?)", true);
-            return;
-        }
+            // Audio Volume Logic
+            let targetVolume = 0;
+            if (analyser) {
+                analyser.getByteFrequencyData(dataArray);
+                let sum = 0;
+                const lowerHalf = Math.floor(dataArray.length / 2);
+                for (let i = 0; i < lowerHalf; i++) sum += dataArray[i];
+                targetVolume = sum / lowerHalf;
+            }
+            currentVolume += (targetVolume - currentVolume) * 0.2;
+            const normalizedVol = currentVolume / 255;
 
-        try {
-            const buffer = await blob.arrayBuffer();
-            const data = new Int16Array(buffer);
-            const float32 = new Float32Array(data.length);
+            // Sphere Morphing
+            const positions = geometry.attributes.position.array;
+            const isTalking = normalizedVol > 0.05;
 
-            // Convert Int16 to Float32
-            for (let i = 0; i < data.length; i++) {
-                float32[i] = data[i] / 32768.0;
+            // Update Status Text
+            if(isConnected) {
+                if(isTalking) {
+                    aiStateText.textContent = "PROCESSING...";
+                    aiStateText.style.color = "#a5b4fc";
+                    sphere.material.emissive.setHex(0x8b5cf6);
+                } else {
+                    aiStateText.textContent = "LISTENING...";
+                    aiStateText.style.color = "#475569";
+                    sphere.material.emissive.setHex(0x4f46e5);
+                }
+            } else {
+                 aiStateText.textContent = "CONNECTING...";
             }
 
-            const audioBuf = ctx.createBuffer(1, float32.length, SAMPLE_RATE);
-            audioBuf.getChannelData(0).set(float32);
+            for (let i = 0; i < positions.length; i += 3) {
+                const ox = originalPositions[i];
+                const oy = originalPositions[i + 1];
+                const oz = originalPositions[i + 2];
+                const v = new THREE.Vector3(ox, oy, oz).normalize();
 
-            const source = ctx.createBufferSource();
-            source.buffer = audioBuf;
-            source.connect(ctx.destination);
+                const noise1 = Math.sin(ox * 0.5 + time) * Math.cos(oy * 0.5 + time);
+                const noise2 = Math.sin(ox * 1.5 + time * 3) * Math.cos(oz * 1.5 + time * 3);
 
-            const now = ctx.currentTime;
-            // Play seamlessly
-            if (nextTime < now) nextTime = now;
-            
-            source.start(nextTime);
-            nextTime += audioBuf.duration;
+                const distortion = (noise1 * 0.2) + (noise2 * normalizedVol * 4);
+                const radius = 4 + distortion;
 
-        } catch (err) {
-            log("❌ Decode Error: " + err, true);
+                positions[i] = v.x * radius;
+                positions[i + 1] = v.y * radius;
+                positions[i + 2] = v.z * radius;
+            }
+
+            geometry.attributes.position.needsUpdate = true;
+            geometry.computeVertexNormals();
+
+            // Gentle Rotation
+            sphere.rotation.y += 0.002 + (normalizedVol * 0.01);
+            sphere.rotation.z += 0.001 + (normalizedVol * 0.01);
+
+            composer.render();
         }
-    }
-</script>
 
+        // ==========================================
+        // 3. AUDIO ENGINE
+        // ==========================================
+        function initAudioEngine() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 512;
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+            }
+            if (audioContext.state === 'suspended') audioContext.resume();
+        }
+
+        function playAudioChunk(arrayBuffer) {
+            initAudioEngine();
+            audioContext.decodeAudioData(arrayBuffer, (buffer) => {
+                audioQueue.push(buffer);
+                if (!isPlaying) processQueue();
+            }, (e) => console.error("Audio Decode Error:", e));
+        }
+
+        function processQueue() {
+            if (audioQueue.length === 0) { isPlaying = false; return; }
+            isPlaying = true;
+            const buffer = audioQueue.shift();
+            const source = audioContext.createBufferSource();
+            source.buffer = buffer;
+            source.connect(analyser);
+            analyser.connect(audioContext.destination);
+            source.start(0);
+            source.onended = () => processQueue();
+        }
+
+        // ==========================================
+        // 4. WEBSOCKET CONNECTION
+        // ==========================================
+        function connectWebSocket() {
+            console.log("Attempting WebSocket Connection to:", WS_URL);
+            socket = new WebSocket(WS_URL);
+
+            socket.onopen = () => {
+                console.log("✅ WebSocket Connected");
+                isConnected = true;
+                statusDot.className = "w-2 h-2 rounded-full bg-green-500 shadow-[0_0_15px_rgba(34,197,94,0.8)]";
+                statusText.textContent = "SYSTEM ONLINE";
+                statusText.className = "text-[10px] font-mono text-green-400 tracking-widest uppercase";
+                fetchVoices();
+            };
+
+            socket.onmessage = async (event) => {
+                if (typeof event.data === 'string') {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'text') addMessage('ai', msg.content);
+                } else {
+                    const arrayBuffer = await event.data.arrayBuffer();
+                    playAudioChunk(arrayBuffer);
+                }
+            };
+
+            socket.onclose = () => {
+                console.warn("⚠️ WebSocket Disconnected. Retrying in 3s...");
+                isConnected = false;
+                statusDot.className = "w-2 h-2 rounded-full bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.8)]";
+                statusText.textContent = "OFFLINE";
+                statusText.className = "text-[10px] font-mono text-red-400 tracking-widest uppercase";
+                setTimeout(connectWebSocket, 3000); 
+            };
+
+            socket.onerror = (err) => {
+                console.error("WebSocket Error:", err);
+            };
+        }
+
+        async function fetchVoices() {
+            try {
+                const res = await fetch(`${API_URL}/voices`);
+                const data = await res.json();
+                voiceSelect.innerHTML = '';
+                data.voices.forEach(v => {
+                    const opt = document.createElement('option');
+                    opt.value = v.id;
+                    opt.textContent = v.name;
+                    voiceSelect.appendChild(opt);
+                });
+            } catch (err) {
+                console.error("Voice Fetch Error:", err);
+            }
+        }
+
+        // ==========================================
+        // 5. UI HANDLERS
+        // ==========================================
+        function addMessage(role, text) {
+            const div = document.createElement('div');
+            div.className = `flex justify-${role === 'user' ? 'end' : 'start'} animate-[fadeIn_0.3s_ease-out]`;
+            div.innerHTML = `<div class="chat-bubble ${role === 'user' ? 'user-bubble' : 'ai-bubble'}">${text}</div>`;
+            chatHistory.appendChild(div);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        document.getElementById('chat-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const text = userInput.value.trim();
+            if (!text) return;
+            
+            if(!isConnected) {
+                alert("System is offline. Check backend console.");
+                return;
+            }
+
+            initAudioEngine(); 
+            addMessage('user', text);
+            userInput.value = '';
+
+            socket.send(JSON.stringify({
+                text: text,
+                voice_id: voiceSelect.value || 'en-US-ken'
+            }));
+        });
+
+        // Initialize
+        initThreeJS();
+        connectWebSocket();
+    </script>
 </body>
 </html>

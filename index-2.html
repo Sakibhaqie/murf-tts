@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Chat Debug</title>
+    <link rel="icon" href="data:,">
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; }
+        .box { background: white; padding: 20px; border-radius: 8px; max-width: 600px; margin: 0 auto; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        #chat { height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; background: #fff; }
+        .msg { padding: 8px 12px; margin: 5px 0; border-radius: 15px; width: fit-content; }
+        .user { background: #007bff; color: white; margin-left: auto; }
+        .bot { background: #e9ecef; color: black; }
+        .controls { display: flex; gap: 10px; }
+        input { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        #debug { font-size: 12px; color: #666; margin-top: 10px; font-family: monospace; }
+        .err { color: red; }
+    </style>
+</head>
+<body>
+
+<div class="box">
+    <h2 style="text-align:center">🔊 Audio Debug Chat</h2>
+    <div id="chat"></div>
+    <div class="controls">
+        <input type="text" id="input" placeholder="Type here..." onkeypress="if(event.key==='Enter') send()">
+        <button onclick="send()">Send</button>
+    </div>
+    <div id="debug">Status: Ready</div>
+</div>
+
+<script>
+    const ws = new WebSocket("ws://localhost:8000/ws");
+    const chat = document.getElementById("chat");
+    const debug = document.getElementById("debug");
+    
+    // Audio State
+    let ctx = null;
+    let nextTime = 0;
+    const SAMPLE_RATE = 24000;
+
+    ws.onopen = () => log("🟢 WS Connected");
+    ws.onclose = () => log("🔴 WS Disconnected");
+    ws.onerror = () => log("⚠️ WS Error", true);
+
+    ws.onmessage = async (e) => {
+        if (e.data instanceof Blob) {
+            // Audio Data Received
+            playAudio(e.data);
+        } else {
+            // Text Received
+            const data = JSON.parse(e.data);
+            if (data.type === 'text') addMsg(data.content, 'bot');
+            if (data.type === 'error') log("Backend Error: " + data.content, true);
+        }
+    };
+
+    function log(msg, isErr = false) {
+        debug.textContent = msg;
+        debug.className = isErr ? 'err' : '';
+        console.log(msg);
+    }
+
+    function addMsg(text, role) {
+        const div = document.createElement("div");
+        div.className = `msg ${role}`;
+        div.textContent = text;
+        chat.appendChild(div);
+        chat.scrollTop = chat.scrollHeight;
+    }
+
+    function send() {
+        const text = document.getElementById("input").value;
+        if (!text) return;
+        
+        // 1. Initialize Audio immediately on click
+        initAudio();
+        
+        addMsg(text, 'user');
+        ws.send(text);
+        document.getElementById("input").value = "";
+    }
+
+    function initAudio() {
+        if (!ctx) {
+            ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+            log("🔊 Audio Context Created");
+        }
+        if (ctx.state === 'suspended') {
+            ctx.resume().then(() => log("🔊 Audio Resumed"));
+        }
+    }
+
+    async function playAudio(blob) {
+        // Ensure context exists
+        if (!ctx) initAudio();
+        
+        const size = blob.size;
+        log(`📥 Received ${size} bytes of audio`);
+
+        if (size < 100) {
+            log("⚠️ Audio chunk too small (Silence/Error?)", true);
+            return;
+        }
+
+        try {
+            const buffer = await blob.arrayBuffer();
+            const data = new Int16Array(buffer);
+            const float32 = new Float32Array(data.length);
+
+            // Convert Int16 to Float32
+            for (let i = 0; i < data.length; i++) {
+                float32[i] = data[i] / 32768.0;
+            }
+
+            const audioBuf = ctx.createBuffer(1, float32.length, SAMPLE_RATE);
+            audioBuf.getChannelData(0).set(float32);
+
+            const source = ctx.createBufferSource();
+            source.buffer = audioBuf;
+            source.connect(ctx.destination);
+
+            const now = ctx.currentTime;
+            // Play seamlessly
+            if (nextTime < now) nextTime = now;
+            
+            source.start(nextTime);
+            nextTime += audioBuf.duration;
+
+        } catch (err) {
+            log("❌ Decode Error: " + err, true);
+        }
+    }
+</script>
+
+</body>
+</html>
